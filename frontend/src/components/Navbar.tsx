@@ -28,12 +28,20 @@ export function Navbar() {
                   护工列表
                 </Link>
                 {hasRole('patient') && (
-                  <Link
-                    to="/orders"
-                    className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
-                  >
-                    我的订单
-                  </Link>
+                  <>
+                    <Link
+                      to="/orders"
+                      className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
+                    >
+                      我的订单
+                    </Link>
+                    <Link
+                      to="/wallet"
+                      className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
+                    >
+                      我的钱包
+                    </Link>
+                  </>
                 )}
                 {hasRole('caregiver') && (
                   <Link

@@ -97,8 +97,7 @@ export function BookingPage() {
         notes,
       });
 
-      await api.post(`/orders/${res.data.order.id}/pay`);
-      navigate('/orders');
+      navigate(`/orders/${res.data.order.id}`);
     } catch (err: any) {
       setError(err.response?.data?.message || '提交订单失败');
     }
@@ -404,7 +403,7 @@ export function BookingPage() {
                 onClick={handleSubmit}
                 className="bg-primary-600 text-white px-8 py-2 rounded-md font-medium hover:bg-primary-700"
               >
-                确认并支付
+                提交订单
               </button>
             </div>
           </div>

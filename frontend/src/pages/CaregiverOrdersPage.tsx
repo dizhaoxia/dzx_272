@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api';
 import { Order, ORDER_STATUS_LABELS, BOOKING_MODE_LABELS, SERVICE_TYPE_LABELS, OrderStatus } from '../types';
 
@@ -7,6 +8,7 @@ const statusColors: Record<OrderStatus, string> = {
   paid: 'bg-blue-100 text-blue-800',
   pending_service: 'bg-purple-100 text-purple-800',
   in_service: 'bg-green-100 text-green-800',
+  pending_completion: 'bg-amber-100 text-amber-800',
   completed: 'bg-gray-100 text-gray-800',
   cancelled: 'bg-red-100 text-red-800',
 };
@@ -101,6 +103,7 @@ export function CaregiverOrdersPage() {
             { value: 'paid', label: '待接单' },
             { value: 'pending_service', label: '待签到' },
             { value: 'in_service', label: '服务中' },
+            { value: 'pending_completion', label: '待确认完成' },
             { value: 'completed', label: '已完成' },
             { value: 'cancelled', label: '已取消' },
           ].map((s) => (
@@ -238,39 +241,45 @@ export function CaregiverOrdersPage() {
                   <div className="mt-4 pt-4 border-t flex justify-between items-center">
                     <div className="text-lg font-bold text-primary-600">¥{order.total_price}</div>
                     <div className="flex space-x-3">
-                      {order.status === 'paid' && (
-                        <>
-                          <button
-                            onClick={() => handleAccept(order.id)}
-                            className="bg-primary-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-700"
-                          >
-                            确认接单
-                          </button>
-                          <button
-                            onClick={() => handleReject(order.id)}
-                            className="border border-red-300 text-red-600 px-4 py-2 rounded-md text-sm font-medium hover:bg-red-50"
-                          >
-                            拒单
-                          </button>
-                        </>
-                      )}
-                      {order.status === 'pending_service' && (
+                    <Link
+                      to={`/caregiver/orders/${order.id}`}
+                      className="bg-primary-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-700"
+                    >
+                      查看详情
+                    </Link>
+                    {order.status === 'paid' && (
+                      <>
                         <button
-                          onClick={() => setCheckinOrderId(order.id)}
+                          onClick={() => handleAccept(order.id)}
                           className="bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-green-700"
                         >
-                          到达签到
+                          确认接单
                         </button>
-                      )}
-                      {order.status === 'in_service' && (
                         <button
-                          onClick={() => handleComplete(order.id)}
-                          className="bg-primary-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-700"
+                          onClick={() => handleReject(order.id)}
+                          className="border border-red-300 text-red-600 px-4 py-2 rounded-md text-sm font-medium hover:bg-red-50"
                         >
-                          完成服务
+                          拒单
                         </button>
-                      )}
-                    </div>
+                      </>
+                    )}
+                    {order.status === 'pending_service' && (
+                      <button
+                        onClick={() => setCheckinOrderId(order.id)}
+                        className="bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-green-700"
+                      >
+                        到达签到
+                      </button>
+                    )}
+                    {order.status === 'in_service' && (
+                      <button
+                        onClick={() => handleComplete(order.id)}
+                        className="bg-primary-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-700"
+                      >
+                        发起完成请求
+                      </button>
+                    )}
+                  </div>
                   </div>
                 )}
               </div>

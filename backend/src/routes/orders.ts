@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { allQuery, getQuery, runQuery } from '../database';
 import { authMiddleware, AuthRequest, requireRole } from '../middleware/auth';
-import { Order, OrderStatus } from '../types';
+import { adjustWallet, ensureWallet } from '../walletService';
+import { maybeAutoComplete, createSettlement, serializeSettlement } from '../settlement';
+import { Order, OrderStatus, Settlement } from '../types';
 
 const router = Router();
 
@@ -28,10 +30,16 @@ const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   pending_payment: ['paid', 'cancelled'],
   paid: ['pending_service', 'cancelled'],
   pending_service: ['in_service', 'cancelled'],
-  in_service: ['completed'],
+  in_service: ['pending_completion'],
+  pending_completion: ['completed'],
   completed: [],
   cancelled: [],
 };
+
+const paySchema = z.object({
+  payment_method: z.enum(['balance', 'third_party']).optional(),
+  simulate_fail: z.boolean().optional(),
+});
 
 async function checkScheduleConflict(
   caregiverId: string,
@@ -150,7 +158,11 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
 
     sql += ' ORDER BY o.created_at DESC';
 
-    const orders = await allQuery(sql, params);
+    let orders = await allQuery(sql, params);
+    for (let i = 0; i < orders.length; i++) {
+      const auto = await maybeAutoComplete(orders[i]);
+      if (auto) orders[i] = auto;
+    }
     res.json({ orders });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -158,6 +170,34 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 router.get('/:id', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    let order = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
+    if (!order) {
+      res.status(404).json({ message: '订单不存在' });
+      return;
+    }
+
+    if (order.patient_id !== req.user!.id && req.user!.role !== 'admin') {
+      res.status(403).json({ message: '无权查看此订单' });
+      return;
+    }
+
+    const auto = await maybeAutoComplete(order);
+    if (auto) order = auto;
+
+    let settlement: Settlement | undefined;
+    if (order.status === 'completed') {
+      settlement = await getQuery<Settlement>('SELECT * FROM settlements WHERE order_id = ?', [id]);
+    }
+
+    res.json({ order, settlement: serializeSettlement(settlement, order) });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/:id/records', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const order = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
@@ -171,7 +211,28 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res) => {
       return;
     }
 
-    res.json({ order });
+    const recordsRaw = await allQuery(
+      `SELECT sr.*, u.name as caregiver_name
+       FROM service_records sr
+       LEFT JOIN caregiver_profiles cp ON sr.caregiver_id = cp.id
+       LEFT JOIN users u ON cp.user_id = u.id
+       WHERE sr.order_id = ? ORDER BY sr.created_at ASC`,
+      [id]
+    );
+    const records = recordsRaw.map((r: any) => ({
+      ...r,
+      images:
+        typeof r.images === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(r.images);
+              } catch {
+                return [];
+              }
+            })()
+          : r.images || [],
+    }));
+    res.json({ records });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -179,6 +240,8 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res) => {
 
 router.post('/:id/pay', authMiddleware, requireRole('patient'), async (req: AuthRequest, res) => {
   try {
+    const data = paySchema.parse(req.body || {});
+    const paymentMethod = data.payment_method || 'third_party';
     const { id } = req.params;
     const order = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
     if (!order) {
@@ -198,12 +261,54 @@ router.post('/:id/pay', authMiddleware, requireRole('patient'), async (req: Auth
     }
 
     const now = new Date().toISOString();
-    await runQuery('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?', ['paid', now, id]);
 
+    if (paymentMethod === 'balance') {
+      const wallet = await ensureWallet(req.user!.id);
+      if (wallet.balance < order.total_price) {
+        res.status(400).json({
+          message: '钱包余额不足，请先充值或选择其他支付方式',
+          balance: wallet.balance,
+          required: order.total_price,
+        });
+        return;
+      }
+      await adjustWallet(req.user!.id, 'payment', -order.total_price, id, `支付订单 ${id.substring(0, 8)}`);
+      await runQuery(
+        'UPDATE orders SET status = ?, payment_method = ?, updated_at = ? WHERE id = ?',
+        ['paid', 'balance', now, id]
+      );
+      const updated = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
+      res.json({ order: updated, payment_method: 'balance', message: '支付成功（余额支付）' });
+      return;
+    }
+
+    const failed = data.simulate_fail === true;
+    if (failed) {
+      res.status(400).json({
+        message: '模拟第三方支付失败：支付回调返回失败',
+        callback: 'fail',
+        payment_method: 'third_party',
+      });
+      return;
+    }
+
+    await runQuery(
+      'UPDATE orders SET status = ?, payment_method = ?, updated_at = ? WHERE id = ?',
+      ['paid', 'third_party', now, id]
+    );
     const updated = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
-    res.json({ order: updated });
+    res.json({
+      order: updated,
+      payment_method: 'third_party',
+      callback: 'success',
+      message: '支付成功（模拟第三方支付）',
+    });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ message: err.errors[0].message });
+    } else {
+      res.status(500).json({ message: err.message || '支付失败' });
+    }
   }
 });
 
@@ -232,6 +337,63 @@ router.post('/:id/cancel', authMiddleware, async (req: AuthRequest, res) => {
 
     const updated = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
     res.json({ order: updated });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/:id/confirm-completion', authMiddleware, requireRole('patient'), async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const order = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
+    if (!order) {
+      res.status(404).json({ message: '订单不存在' });
+      return;
+    }
+
+    if (order.patient_id !== req.user!.id) {
+      res.status(403).json({ message: '无权操作此订单' });
+      return;
+    }
+
+    const allowedTransitions = ORDER_STATUS_TRANSITIONS[order.status];
+    if (!allowedTransitions.includes('completed')) {
+      res.status(400).json({ message: '当前订单状态无法确认完成' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const actualEnd = order.actual_end_time ? new Date(order.actual_end_time) : new Date();
+    await createSettlement(order, actualEnd, 'patient');
+    await runQuery(
+      'UPDATE orders SET status = ?, actual_end_time = COALESCE(actual_end_time, ?), completed_by = ?, updated_at = ? WHERE id = ?',
+      ['completed', now, 'patient', now, id]
+    );
+
+    const updated = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
+    const settlement = await getQuery<Settlement>('SELECT * FROM settlements WHERE order_id = ?', [id]);
+    res.json({ order: updated, settlement: serializeSettlement(settlement, updated), message: '已确认完成，结算明细已生成' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/:id/settlement', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const order = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
+    if (!order) {
+      res.status(404).json({ message: '订单不存在' });
+      return;
+    }
+
+    if (order.patient_id !== req.user!.id && req.user!.role !== 'admin') {
+      res.status(403).json({ message: '无权查看此订单' });
+      return;
+    }
+
+    const settlement = await getQuery<Settlement>('SELECT * FROM settlements WHERE order_id = ?', [id]);
+    res.json({ settlement: serializeSettlement(settlement, order) });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

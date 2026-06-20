@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { allQuery, getQuery, runQuery } from '../database';
 import { generateToken, authMiddleware, AuthRequest } from '../middleware/auth';
+import { ensureWallet } from '../walletService';
 import { User } from '../types';
 
 const router = Router();
@@ -44,6 +45,8 @@ router.post('/register', async (req, res) => {
         'INSERT INTO caregiver_profiles (id, user_id, avatar, bio, certificate_url, work_years, service_types, hourly_rate, daily_rate, rating, rating_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [uuidv4(), userId, '', '', '', 0, 'normal', 50, 300, 5.0, 0, now]
       );
+    } else {
+      await ensureWallet(userId);
     }
 
     const token = generateToken({ id: userId, username: data.username, role: data.role, name: data.name });
