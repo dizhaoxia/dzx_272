@@ -72,8 +72,8 @@ export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   pending_payment: '待支付',
-  paid: '已支付',
-  pending_service: '待服务',
+  paid: '待接单',
+  pending_service: '待签到',
   in_service: '服务中',
   completed: '已完成',
   cancelled: '已取消',

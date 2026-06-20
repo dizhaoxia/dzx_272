@@ -71,7 +71,8 @@ export function OrderListPage() {
           {[
             { value: 'all', label: '全部' },
             { value: 'pending_payment', label: '待支付' },
-            { value: 'pending_service', label: '待服务' },
+            { value: 'paid', label: '待接单' },
+            { value: 'pending_service', label: '待签到' },
             { value: 'in_service', label: '服务中' },
             { value: 'completed', label: '已完成' },
             { value: 'cancelled', label: '已取消' },

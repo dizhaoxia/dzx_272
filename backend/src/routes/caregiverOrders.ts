@@ -72,12 +72,16 @@ router.post('/orders/:id/accept', authMiddleware, requireRole('caregiver'), asyn
       return;
     }
 
-    if (order.status !== 'pending_service') {
+    if (order.status !== 'paid') {
       res.status(400).json({ message: '当前订单状态无法接单' });
       return;
     }
 
-    res.json({ order, message: '接单成功（订单已处于待服务状态）' });
+    const now = new Date().toISOString();
+    await runQuery('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?', ['pending_service', now, id]);
+
+    const updated = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
+    res.json({ order: updated, message: '接单成功' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

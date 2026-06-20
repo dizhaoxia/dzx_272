@@ -98,7 +98,8 @@ export function CaregiverOrdersPage() {
         <div className="flex flex-wrap gap-2">
           {[
             { value: 'all', label: '全部' },
-            { value: 'pending_service', label: '待接单' },
+            { value: 'paid', label: '待接单' },
+            { value: 'pending_service', label: '待签到' },
             { value: 'in_service', label: '服务中' },
             { value: 'completed', label: '已完成' },
             { value: 'cancelled', label: '已取消' },
@@ -237,7 +238,7 @@ export function CaregiverOrdersPage() {
                   <div className="mt-4 pt-4 border-t flex justify-between items-center">
                     <div className="text-lg font-bold text-primary-600">¥{order.total_price}</div>
                     <div className="flex space-x-3">
-                      {order.status === 'pending_service' && (
+                      {order.status === 'paid' && (
                         <>
                           <button
                             onClick={() => handleAccept(order.id)}
@@ -252,12 +253,6 @@ export function CaregiverOrdersPage() {
                             拒单
                           </button>
                         </>
-                      )}
-                      {order.status === 'pending_service' && (
-                        <button
-                          onClick={() => setCheckinOrderId(order.id)}
-                          className="hidden"
-                        />
                       )}
                       {order.status === 'pending_service' && (
                         <button

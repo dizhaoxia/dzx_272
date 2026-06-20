@@ -198,7 +198,7 @@ router.post('/:id/pay', authMiddleware, requireRole('patient'), async (req: Auth
     }
 
     const now = new Date().toISOString();
-    await runQuery('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?', ['pending_service', now, id]);
+    await runQuery('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?', ['paid', now, id]);
 
     const updated = await getQuery<Order>('SELECT * FROM orders WHERE id = ?', [id]);
     res.json({ order: updated });
